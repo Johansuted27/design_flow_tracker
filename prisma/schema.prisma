@@ -1,0 +1,413 @@
+// DesignFlow Tracker — Prisma Schema
+// Database: PostgreSQL (Supabase)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── ENUMS ────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  manager
+  spv
+  designer
+  brand
+}
+
+enum ProjectStatus {
+  brief_received
+  need_brief_completion
+  in_queue
+  assigned
+  in_progress
+  internal_review
+  revision
+  waiting_brand_approval
+  approved
+  final_artwork
+  completed
+  on_hold
+  cancelled
+}
+
+enum Priority {
+  urgent
+  high
+  medium
+  low
+}
+
+enum ComplexityLevel {
+  simple
+  medium
+  complex
+  major
+}
+
+enum DelayStatus {
+  on_track
+  at_risk
+  overdue
+}
+
+enum ApprovalStatus {
+  pending
+  approved
+  rejected
+}
+
+enum SyncStatus {
+  synced
+  pending
+  failed
+  conflict
+}
+
+enum FeedbackCategory {
+  layout
+  copy
+  branding
+  image
+  technical
+  other
+}
+
+enum IntegrationProvider {
+  trello
+  google_sheets
+  google_drive
+  google_calendar
+}
+
+enum SyncDirection {
+  outbound
+  inbound
+}
+
+enum SyncLogStatus {
+  success
+  failed
+  conflict
+  skipped
+}
+
+enum FileType {
+  brief
+  reference
+  working
+  preview
+  final
+  asset
+}
+
+// ─── MODELS ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  emailVerified DateTime?
+  image        String?
+  role         UserRole @default(brand)
+  department   String?
+  googleId     String?  @unique @map("google_id")
+  activeStatus Boolean  @default(true) @map("active_status")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  accounts          Account[]
+  sessions          Session[]
+  projectsAsPIC     Project[]    @relation("PICDesigner")
+  projectsAsSupport Project[]    @relation("SupportDesigner")
+  projectsRequested Project[]    @relation("Requester")
+  projectsUpdated   Project[]    @relation("LastUpdatedBy")
+  feedbackGiven     Feedback[]
+  internalApprovals Approval[]   @relation("InternalApprover")
+  brandApprovals    Approval[]   @relation("BrandApprover")
+  filesUploaded     File[]
+  kpiRecords        KPI[]
+  integrationTokens IntegrationToken[]
+  activityLogs      ActivityLog[]
+  syncConflictsResolved SyncLog[] @relation("ConflictResolver")
+
+  @@map("users")
+}
+
+// NextAuth required models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Project {
+  id                    String          @id // Format: DF-YYYYMM-XXXX
+  requestDate           DateTime        @map("request_date")
+  requesterId           String          @map("requester_id")
+  brand                 String
+  projectName           String          @map("project_name")
+  projectType           String          @map("project_type")
+  objective             String          @db.Text
+  deliverables          String          @db.Text
+  sizeFormat            String?         @map("size_format")
+  keyMessage            String?         @db.Text @map("key_message")
+  mandatoryElements     String?         @db.Text @map("mandatory_elements")
+  referenceLink         String?         @map("reference_link")
+  attachmentLink        String?         @map("attachment_link")
+  priority              Priority        @default(medium)
+  brandPriority         Int             @default(3) @map("brand_priority")
+  complexityLevel       ComplexityLevel @default(medium) @map("complexity_level")
+  complexityScore       Int             @default(2) @map("complexity_score")
+  picDesignerId         String?         @map("pic_designer_id")
+  supportDesignerId     String?         @map("support_designer_id")
+  startDate             DateTime?       @map("start_date")
+  firstDraftDeadline    DateTime?       @map("first_draft_deadline")
+  internalReviewDeadline DateTime?      @map("internal_review_deadline")
+  brandApprovalDeadline DateTime?       @map("brand_approval_deadline")
+  finalDeadline         DateTime        @map("final_deadline")
+  completedDate         DateTime?       @map("completed_date")
+  currentStatus         ProjectStatus   @default(brief_received) @map("current_status")
+  approvalStatus        ApprovalStatus  @default(pending) @map("approval_status")
+  delayStatus           DelayStatus     @default(on_track) @map("delay_status")
+  revisionRound         Int             @default(0) @map("revision_round")
+  workloadScore         Float           @default(0) @map("workload_score")
+  timelineScore         Float?          @map("timeline_score")
+  kpiScore              Float?          @map("kpi_score")
+  notes                 String?         @db.Text
+  trelloCardId          String?         @map("trello_card_id")
+  trelloCardUrl         String?         @map("trello_card_url")
+  googleSheetRowId      String?         @map("google_sheet_row_id")
+  driveFolderUrl        String?         @map("drive_folder_url")
+  briefLink             String?         @map("brief_link")
+  workingFileLink       String?         @map("working_file_link")
+  previewFileLink       String?         @map("preview_file_link")
+  finalArtworkLink      String?         @map("final_artwork_link")
+  assetFolderLink       String?         @map("asset_folder_link")
+  lastUpdatedById       String?         @map("last_updated_by")
+  syncStatus            SyncStatus      @default(pending) @map("sync_status")
+  lastSyncedAt          DateTime?       @map("last_synced_at")
+  createdAt             DateTime        @default(now()) @map("created_at")
+  updatedAt             DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  requester       User          @relation("Requester", fields: [requesterId], references: [id])
+  picDesigner     User?         @relation("PICDesigner", fields: [picDesignerId], references: [id])
+  supportDesigner User?         @relation("SupportDesigner", fields: [supportDesignerId], references: [id])
+  lastUpdatedBy   User?         @relation("LastUpdatedBy", fields: [lastUpdatedById], references: [id])
+  feedback        Feedback[]
+  approval        Approval?
+  files           File[]
+  activityLogs    ActivityLog[]
+  syncLogs        SyncLog[]
+
+  @@map("projects")
+}
+
+model Feedback {
+  id             String           @id @default(cuid())
+  projectId      String           @map("project_id")
+  feedbackBy     String           @map("feedback_by")
+  feedbackRole   String           @map("feedback_role")
+  category       FeedbackCategory
+  note           String           @db.Text
+  revisionRound  Int              @map("revision_round")
+  isResolved     Boolean          @default(false) @map("is_resolved")
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  project  Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user     User    @relation(fields: [feedbackBy], references: [id])
+
+  @@map("feedback")
+}
+
+model Approval {
+  id                     String         @id @default(cuid())
+  projectId              String         @unique @map("project_id")
+  internalApprovalStatus ApprovalStatus @default(pending) @map("internal_approval_status")
+  internalApprovedBy     String?        @map("internal_approved_by")
+  internalApprovedAt     DateTime?      @map("internal_approved_at")
+  brandApprovalStatus    ApprovalStatus @default(pending) @map("brand_approval_status")
+  brandApprovedBy        String?        @map("brand_approved_by")
+  brandApprovedAt        DateTime?      @map("brand_approved_at")
+  finalApprovalStatus    ApprovalStatus @default(pending) @map("final_approval_status")
+  approvalNotes          String?        @db.Text @map("approval_notes")
+  checkBriefComplete     Boolean        @default(false) @map("check_brief_complete")
+  checkObjectiveMatch    Boolean        @default(false) @map("check_objective_match")
+  checkMandatoryElements Boolean        @default(false) @map("check_mandatory_elements")
+  checkSizeFormat        Boolean        @default(false) @map("check_size_format")
+  checkCopyChecked       Boolean        @default(false) @map("check_copy_checked")
+  checkBrandGuideline    Boolean        @default(false) @map("check_brand_guideline")
+  updatedAt              DateTime       @updatedAt @map("updated_at")
+
+  project          Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  internalApprover User?   @relation("InternalApprover", fields: [internalApprovedBy], references: [id])
+  brandApprover    User?   @relation("BrandApprover", fields: [brandApprovedBy], references: [id])
+
+  @@map("approvals")
+}
+
+model File {
+  id          String   @id @default(cuid())
+  projectId   String   @map("project_id")
+  fileType    FileType @map("file_type")
+  fileName    String   @map("file_name")
+  fileUrl     String   @map("file_url")
+  version     Int      @default(1)
+  uploadedBy  String   @map("uploaded_by")
+  notes       String?
+  uploadedAt  DateTime @default(now()) @map("uploaded_at")
+
+  project  Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  uploader User    @relation(fields: [uploadedBy], references: [id])
+
+  @@map("files")
+}
+
+model KPI {
+  id                  String   @id @default(cuid())
+  designerId          String   @map("designer_id")
+  periodMonth         Int      @map("period_month")
+  periodYear          Int      @map("period_year")
+  periodQuarter       Int      @map("period_quarter")
+  totalProjectCount   Int      @default(0) @map("total_project_count")
+  totalCompleted      Int      @default(0) @map("total_completed")
+  onTimeCount         Int      @default(0) @map("on_time_count")
+  onTimeRate          Float    @default(0) @map("on_time_rate")
+  avgDurationDays     Float    @default(0) @map("avg_duration_days")
+  avgRevisionRound    Float    @default(0) @map("avg_revision_round")
+  urgentHandled       Int      @default(0) @map("urgent_handled")
+  delayedCount        Int      @default(0) @map("delayed_count")
+  complexityPoints    Int      @default(0) @map("complexity_points")
+  approvalSpeedAvg    Float    @default(0) @map("approval_speed_avg")
+  timelineScore       Float    @default(0) @map("timeline_score")
+  weightedKpiScore    Float    @default(0) @map("weighted_kpi_score")
+  kpiTarget           Float    @default(80) @map("kpi_target")
+  kpiAchievementPct   Float    @default(0) @map("kpi_achievement_pct")
+  notes               String?  @db.Text
+  calculatedAt        DateTime @default(now()) @map("calculated_at")
+
+  designer User @relation(fields: [designerId], references: [id])
+
+  @@unique([designerId, periodMonth, periodYear])
+  @@map("kpi_records")
+}
+
+model KPIMapping {
+  id              String   @id @default(cuid())
+  indicatorName   String   @map("indicator_name")
+  sheetColumnRef  String?  @map("sheet_column_ref")
+  appFieldRef     String?  @map("app_field_ref")
+  bobotScore      Float    @map("bobot_score")
+  measurementRule String   @db.Text @map("measurement_rule")
+  targetValue     Float?   @map("target_value")
+  unit            String?
+  higherIsBetter  Boolean  @default(true) @map("higher_is_better")
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("kpi_mappings")
+}
+
+model IntegrationToken {
+  id                    String              @id @default(cuid())
+  userId                String              @map("user_id")
+  provider              IntegrationProvider
+  accessTokenEncrypted  String?             @db.Text @map("access_token_encrypted")
+  refreshTokenEncrypted String?             @db.Text @map("refresh_token_encrypted")
+  tokenExpiresAt        DateTime?           @map("token_expires_at")
+  scope                 String?
+  trelloBoardId         String?             @map("trello_board_id")
+  gsheetTrackerId       String?             @map("gsheet_tracker_id")
+  gsheetKpiId           String?             @map("gsheet_kpi_id")
+  gdriveParentFolderId  String?             @map("gdrive_parent_folder_id")
+  gcalCalendarId        String?             @map("gcal_calendar_id")
+  columnMapping         Json?               @map("column_mapping") // GSheet column mapping
+  trelloListMapping     Json?               @map("trello_list_mapping")
+  connectedStatus       Boolean             @default(false) @map("connected_status")
+  connectedAt           DateTime?           @map("connected_at")
+  lastSyncAt            DateTime?           @map("last_sync_at")
+  errorMessage          String?             @db.Text @map("error_message")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@map("integration_tokens")
+}
+
+model SyncLog {
+  id                   String        @id @default(cuid())
+  projectId            String?       @map("project_id")
+  provider             IntegrationProvider
+  action               String
+  direction            SyncDirection
+  status               SyncLogStatus
+  requestPayload       Json?         @map("request_payload")
+  responsePayload      Json?         @map("response_payload")
+  errorMessage         String?       @db.Text @map("error_message")
+  conflictField        String?       @map("conflict_field")
+  conflictAppValue     String?       @map("conflict_app_value")
+  conflictProviderValue String?      @map("conflict_provider_value")
+  resolvedBy           String?       @map("resolved_by")
+  resolvedAt           DateTime?     @map("resolved_at")
+  syncedAt             DateTime      @default(now()) @map("synced_at")
+
+  project  Project? @relation(fields: [projectId], references: [id])
+  resolver User?    @relation("ConflictResolver", fields: [resolvedBy], references: [id])
+
+  @@map("sync_logs")
+}
+
+model ActivityLog {
+  id           String   @id @default(cuid())
+  projectId    String?  @map("project_id")
+  userId       String   @map("user_id")
+  actionType   String   @map("action_type")
+  fieldChanged String?  @map("field_changed")
+  oldValue     String?  @db.Text @map("old_value")
+  newValue     String?  @db.Text @map("new_value")
+  notes        String?  @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  project Project? @relation(fields: [projectId], references: [id])
+  user    User     @relation(fields: [userId], references: [id])
+
+  @@map("activity_logs")
+}
