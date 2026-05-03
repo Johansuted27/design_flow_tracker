@@ -1,5 +1,6 @@
 import { auth } from "@/auth"
 import { prisma } from "@/lib/db"
+import { ProjectStatus } from "@prisma/client"
 import Link from "next/link"
 import { StatusBadge, PriorityBadge } from "@/components/shared/badges"
 import { formatDate } from "@/lib/utils"
@@ -13,8 +14,8 @@ export default async function ReviewPage() {
   if (!session) return null
 
   const where = session.user.role === "brand"
-    ? { currentStatus: "waiting_brand_approval", requesterId: session.user.id }
-    : { currentStatus: { in: ["internal_review", "waiting_brand_approval"] } }
+    ? { currentStatus: ProjectStatus.waiting_brand_approval, requesterId: session.user.id }
+    : { currentStatus: { in: [ProjectStatus.internal_review, ProjectStatus.waiting_brand_approval] } }
 
   const projects = await prisma.project.findMany({
     where,
